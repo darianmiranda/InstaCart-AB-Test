@@ -12,7 +12,7 @@ Full R code Rmd file can be found [here](https://github.com/darianmiranda/InstaC
 
 Full R code html file can be found [here](https://github.com/darianmiranda/InstaCart-AB-Test/blob/main/abtesting.html)
 
-View the data [here](https://www.kaggle.com/datasets/yasserh/instacart-online-grocery-basket-analysis-dataset)
+View the data source [here](https://www.kaggle.com/datasets/yasserh/instacart-online-grocery-basket-analysis-dataset)
 
 ---
 
