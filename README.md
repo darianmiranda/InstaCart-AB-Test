@@ -50,9 +50,5 @@ Based on the findings, reminder notification systems could be used strategically
 
 The observed increase in ordering behavior suggests that personalized reorder reminders may provide measurable business value when implemented thoughtfully at scale. Platforms could potentially use similar experimentation frameworks to optimize customer engagement strategies and evaluate future product interventions.
 
+Future improvements to the experimental framework could include evaluating heterogeneous treatment effects across different customer behaviors, measuring longer term retention impacts, and testing alternative notification timing or personalization strategies.
 
-
-##########
-
-
-Future improvements to the experimental framework could include user segmentation analysis, long-term retention measurement, personalization strategies, and evaluation of potential notification fatigue effects across different customer groups.
