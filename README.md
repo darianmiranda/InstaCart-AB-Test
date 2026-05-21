@@ -10,7 +10,7 @@ This project evaluated whether reminder notifications encouraging users to reord
 
 Full R code Rmd file can be found [here](https://github.com/darianmiranda/InstaCart-AB-Test/blob/main/InstaCart-AB-Test.Rmd)
 
-Full R code html file can be found [here](https://github.com/darianmiranda/InstaCart-AB-Test/blob/main/abtesting.html)
+Full R code html file can be found [here](https://github.com/darianmiranda/InstaCart-AB-Test/blob/main/InstaCart-AB-Test.html)
 
 View the data source [here](https://www.kaggle.com/datasets/yasserh/instacart-online-grocery-basket-analysis-dataset)
 
