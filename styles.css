@@ -1,0 +1,47 @@
+/* ===============================
+   Global text defaults
+   =============================== */
+
+body {
+  color: #000000;
+}
+
+/* ===============================
+   Title and author styling
+   =============================== */
+
+/* Main title */
+h2 {
+  text-align: center;
+  color: #000000;
+  font-weight: 800;
+  margin-bottom: 0.1em;
+}
+
+/* Author name (bold line directly under title) */
+h2 + p {
+  text-align: center;
+  color: #000000;
+  font-weight: 700;
+  margin-top: 0;
+  margin-bottom: 1.2em;
+}
+
+/* ===============================
+   Section headers
+   =============================== */
+
+h2, h3, h4, h5, h6 {
+  color: #000000;
+  font-weight: 700;
+  margin-bottom: 0.2em;
+}
+
+/* ===============================
+   Paragraph spacing
+   =============================== */
+
+p {
+  margin-top: 0.2em;
+  margin-bottom: 0.8em;
+}
