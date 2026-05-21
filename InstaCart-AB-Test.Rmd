@@ -1,0 +1,589 @@
+---
+output:
+  html_document:
+    css: styles.css
+---
+
+<br>
+
+## Evaluating Reminder Push Notifications on InstaCart Orders
+**Darian Miranda Olivas**
+
+## Overview
+End to end A/B testing workflow evaluating whether reminder push notifications increase InstaCart ordering activity using randomized experimental analysis.
+
+
+## Experiment Findings
+Reminder notifications increased orders by approximately **0.198 orders per user** with a **95% confidence interval of 0.193–0.202**, indicating a statistically significant positive treatment effect.
+
+## Data Source
+This analysis uses the InstaCart Online Grocery Basket Analysis Data set made available on Kaggle. Access the data [here](https://www.kaggle.com/datasets/yasserh/instacart-online-grocery-basket-analysis-dataset).
+
+<br>
+<br>
+
+### Data Integration
+**Purpose:** Prepare raw Instacart data into a consistent format ready for analysis.
+
+```{r data_integration, message=FALSE, warning=FALSE}
+
+#====== Set seed for reproducibility =====
+  
+RNGkind("L'Ecuyer-CMRG")
+set.seed(94745850) ##seed number was randomly typed into keyboard
+
+
+
+
+
+#====== Load in necessary packages ======
+
+library(pacman) #for installing and loading packages
+
+p_load(effectsize, #for Cohens d
+       modelsummary, #for model tables
+       pwr, #for power test
+       rstatix, #for Wilcoxon test
+       sandwich, #for robust SEs
+       tidyverse) #for code structure
+
+
+
+
+
+#====== Read in data ======
+
+orders_tbl <- read_csv("orders.csv")
+
+order_products_tbl <- read_csv("order_products__prior.csv")
+
+
+
+
+
+#====== Join order and product tbls =======
+
+base_tbl <- orders_tbl %>%
+  left_join(order_products_tbl, by = "order_id") %>%
+  select(-order_hour_of_day, -add_to_cart_order, -reordered) %>%
+  filter(eval_set == "prior") #data set originally for prediction so we filter out incomplete train and test evaluation sets
+  
+```
+<br>
+
+### Data Validation
+**Purpose:** Ensure data reliability by performing quality checks before constructing the experimental data set.
+
+```{r data_validation, message=FALSE, warning=FALSE}
+
+#====== Inspect data ======
+
+glimpse(base_tbl)
+
+
+
+
+
+#====== Check for missing values ====
+
+colSums(is.na(base_tbl))
+
+#Result is there exist NA values in the days_since_prior_order column
+
+
+
+#---- Inspect missing values ----
+
+is_na_base_tbl <- base_tbl %>%
+  filter(is.na(days_since_prior_order) == TRUE)
+
+glimpse(is_na_base_tbl)
+
+#Result is that NA only appears in in days_since_prior_order column when order_number column is 1, this is a structural NA and not missing data
+
+
+
+
+
+#====== Check number of users and orders =====
+
+n_distinct(base_tbl$user_id)
+
+
+n_distinct(base_tbl$order_id)
+
+
+
+
+
+#====== Check statistics for key numeric variables =====
+
+base_tbl %>%
+  select(order_number, order_dow, days_since_prior_order) %>%
+  summary()
+
+
+
+
+
+#====== Check for duplicates ======
+
+#anyDuplicated(base_tbl)
+
+#Result is that there are no duplicated rows
+
+```
+<br>
+
+### Experiment Design
+**Purpose:** Construct user level features and simulate a randomized controlled experiment, including treatment assignment and post treatment outcomes.
+
+```{r experiment_design}
+
+#The summary statistics below would only be calculated for subjects actually in the experiment, however, because I will use the entire data in this simulated experiment and to reduce dimensions for my personal computer, I do this before treatment assignment.
+
+
+#====== Calculate order sizes ======
+
+order_sizes_tbl <- base_tbl %>%
+  select(order_id, product_id) %>%
+  group_by(order_id) %>%
+  summarise(order_size = n()) %>% 
+  ungroup()
+  
+
+
+
+
+#====== Calculate user level statistics ======
+
+by_user_tbl <- base_tbl %>%
+  select(order_id, user_id, order_dow, days_since_prior_order) %>%
+  left_join(order_sizes_tbl,
+            by = "order_id") %>%
+  group_by(user_id) %>%
+  summarise(
+    
+    prior_total_orders      = n_distinct(order_id),
+    avg_days_between_orders = mean(days_since_prior_order, na.rm = TRUE),
+    avg_order_size          = mean(order_size),
+    weekend_order_rate      = mean(order_dow %in% c(0, 6)) #Sun = 0, Sat = 6
+    
+    ) %>%
+  ungroup()
+
+
+
+
+
+#====== Randomly assign treatment =====
+
+experiment_tbl <- by_user_tbl %>%
+  mutate(group = rbinom(n(), 1, 0.5)) %>%
+  mutate(group = factor(group))
+
+
+
+
+
+#====== Simulate treatment effect ====
+
+experiment_tbl <- experiment_tbl %>%
+    mutate(incremental_orders = if_else(group == "1",
+                                       rpois(n(), lambda = 0.3),  #treatment lift
+                                       rpois(n(), lambda = 0.1)))  #baseline noise
+
+
+
+
+
+#====== Define frequent users ====
+
+#Frequent users are those in the top 25% of total orders prior to the experiment
+#Flagging frequent users will allow us to test for heterogeneous treatment effects later
+
+frequent_user_threshold <- quantile(experiment_tbl$prior_total_orders, 0.75)
+
+
+experiment_tbl <- experiment_tbl %>%
+  mutate(is_frequent_user = if_else(prior_total_orders >= frequent_user_threshold, 1, 0))  
+
+```
+<br>
+
+### Estimating Sample Size (n)
+**Purpose:** Estimate the required sample size to detect a meaningful treatment effect with sufficient statistical power.
+
+```{r n_estimate}
+
+#In practice this would be estimated before an experiment takes place
+
+
+#====== Estimate pre experiment Cohens d ====
+
+#I use prior total order variability as a proxy for incremental orders outcome variance
+
+sd_prior_total_orders <- sd(experiment_tbl$prior_total_orders)
+
+delta <- 0.5 #business decision
+
+pre_cohens_d <- delta/sd_prior_total_orders
+
+
+
+
+
+#====== Estimate required sample size ====
+
+pwr.t.test(d           = pre_cohens_d,
+           power       = 0.8,
+           sig.level   = 0.05,
+           type        = "two.sample",
+           alternative = "two.sided")
+
+#Result is that we need at least 17,431 subjects in each group in order to reliably detect a meaningful change in behavior
+
+
+nrow(experiment_tbl)
+
+```
+<br>
+
+### Visualizing Groups
+**Purpose:** Compare outcome distributions across treatment and control groups to assess distributional properties and validate modeling assumptions.
+
+```{r visualizing_groups}
+
+#I use histograms instead of density plots for incremental_orders and total_orders because these are discrete count variables.
+
+#====== Create incremental orders histogram =====
+
+plot_incremental_orders <- ggplot(experiment_tbl, aes(x = incremental_orders, fill = group)) +
+  geom_histogram(binwidth = 1, position = "identity", alpha = 0.4) +
+  
+  #---- specify colors for plots ----
+  scale_fill_manual(
+    values = c("0" = "#4C78A8",
+               "1" = "#F58518"),
+    labels = c("Control",
+               "Treatment")) +
+  
+  #---- specify titles and labels ----
+  labs(
+    title = "Distribution of Incremental Orders by Group",
+    x = "Incremental Orders",
+      y = "Number of Users",
+    fill = NULL
+  ) +
+  
+  #---- specify theme ----
+  theme_minimal(base_size = 12) +
+  
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    legend.position = "top"
+  )
+
+plot_incremental_orders
+
+
+
+
+
+#====== Create prior total orders histogram =====
+
+plot_prior_total_orders <- ggplot(experiment_tbl, aes(x = prior_total_orders, fill = group)) +
+  geom_histogram(binwidth = 1, position = "identity", alpha = 0.4) +
+  
+  #---- specify colors for plots ----
+  scale_fill_manual(
+    values = c("0" = "#4C78A8",
+               "1" = "#F58518"),
+    labels = c("Control",
+               "Treatment")) +
+  
+  #---- specify titles and labels ----
+  labs(
+    title = "Distribution Of Prior Total Orders",
+
+    x = "Prior Total Orders",
+    y = "Number of Users",
+    fill = NULL
+  ) +
+  
+  #---- Specify theme ----
+  theme_minimal(base_size = 12) +
+  
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    legend.position = "top"
+  )
+
+plot_prior_total_orders
+
+
+
+
+
+#====== Create avg days between orders density graph =====
+
+plot_avg_days_between_orders <- ggplot(experiment_tbl, aes(x = avg_days_between_orders, fill = group)) +
+  geom_density(alpha = 0.4, linewidth = 0.2) +
+  
+  #---- specify colors for plots ----
+  scale_fill_manual(
+    values = c("0" = "#4C78A8",
+               "1" = "#F58518"),
+    labels = c("Control",
+               "Treatment")) +
+  
+  #---- specify titles and labels ----
+  labs(
+    title = "Distribution Of Average Days Between Orders",
+    x = "Avg Days Between Orders",
+    y = "Density",
+    fill = NULL
+  ) +
+  
+  #---- Specify theme ----
+  theme_minimal(base_size = 12) +
+  
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    legend.position = "top"
+  )
+
+plot_avg_days_between_orders
+
+
+
+
+
+#====== Create avg order size density graph =====
+
+plot_avg_order_size <- ggplot(experiment_tbl, aes(x = avg_order_size, fill = group)) +
+  geom_density(alpha = 0.4, linewidth = 0.2) +
+  
+  #---- specify colors for plots ----
+  scale_fill_manual(
+    values = c("0" = "#4C78A8",
+               "1" = "#F58518"),
+    labels = c("Control",
+               "Treatment")) +
+  
+  #---- specify titles and labels ----
+  labs(
+    title = "Distribution of Average Order Size",
+    x = "Avg Order Size",
+    y = "Density",
+    fill = NULL
+  ) +
+  
+  #---- Specify theme ----
+  theme_minimal(base_size = 12) +
+  
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    legend.position = "top"
+  )
+
+plot_avg_order_size
+
+
+
+
+
+#====== Create weekend order rate density graph =====
+
+plot_weekend_order_rate <- ggplot(experiment_tbl, aes(x = weekend_order_rate, fill = group)) +
+  geom_density(alpha = 0.4, linewidth = 0.2) +
+  
+  #---- specify colors for plots ----
+  scale_fill_manual(
+    values = c("0" = "#4C78A8",
+               "1" = "#F58518"),
+    labels = c("Control",
+               "Treatment")) +
+  
+  #---- specify titles and labels ----
+  labs(
+    title = "Distribution of Weekend Order Rate",
+    x = "Weekend Order Rate",
+    y = "Density",
+    fill = NULL
+  ) +
+  
+  #---- Specify theme ----
+  theme_minimal(base_size = 12) +
+  
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    legend.position = "top"
+  )
+
+plot_weekend_order_rate
+
+
+#Overall treatment and control distributions appear broadly similar, which is consistent with successful randomization
+
+```
+<br>
+
+### Balance Tests
+**Purpose:** Evaluate whether treatment and control groups are statistically similar across pre treatment covariates, verifying validity of random assignment.
+
+```{r balance_tests}
+
+#====== Test for statistical differences across key user level statistics =====
+
+balance_prior_total_orders <- lm(prior_total_orders ~ group, data = experiment_tbl)
+
+balance_avg_days_between_orders <- lm(avg_days_between_orders ~ group, data = experiment_tbl)
+
+balance_avg_order_size <- lm(avg_order_size ~ group, data = experiment_tbl)
+
+balance_weekend_order_rate <- lm(weekend_order_rate ~ group, data = experiment_tbl)
+
+
+
+
+
+#====== Display model results in a single table ====
+
+modelsummary(
+  list(
+    "Prior Total Orders"       = balance_prior_total_orders,
+    "Avg Days Between Orders"  = balance_avg_days_between_orders,
+    "Avg Order Size"           = balance_avg_order_size,
+    "Weekend Rate"             = balance_weekend_order_rate
+    ),
+  stars       = TRUE,
+  vcov        = "HC1", #use robust standard errors
+  statistic   = "std.error",
+  coef_rename = c("group1" = "Difference (Treatment - Control)"),
+  gof_omit    = "R2|Adj|AIC|BIC|Log|F|RMSE",
+  title       = "Pre Treatment Covariate Balance Assessment"
+)
+
+```
+<br>
+
+### Experiment Test
+**Purpose:** Estimate the causal effect of the treatment using regression and assess robustness of results.
+```{r experiment_test}
+
+#====== Test statistical difference across groups for incremental orders using linear model ====
+
+test_model <- lm(incremental_orders ~ group * is_frequent_user +
+                 prior_total_orders +
+                 avg_days_between_orders +
+                 avg_order_size +
+                 weekend_order_rate,
+                 data = experiment_tbl)
+
+
+
+
+
+#====== Display results in formatted table =====
+
+modelsummary(test_model,
+             stars       = TRUE,
+             vcov        = "HC1", #use robust standard errors
+             statistic   = "conf.int",
+             coef_rename = c("group1"                    = "Treatment",
+                             "is_frequent_user"          = "Frequent User",
+                             "prior_total_orders"        = "Prior Total Orders",
+                             "avg_days_between_orders"   = "Avg Days Between Orders",
+                             "avg_order_size"            = "Avg Order Size",
+                             "weekend_order_rate"        = "Weekend Order Rate",
+                             "group1:is_frequent_user"   = "Frequent User Treatment Effect"),
+             gof_omit    = "R2|Adj|AIC|BIC|Log|F|RMSE",
+             title       = "Estimated Treatment Effects of Push Notifications On User Ordering Behavior")
+
+
+
+
+
+#I include the Wilcoxon test as a robustness check, as it does not rely on distributional assumptions and is less sensitive to outliers
+
+#====== Test statistical difference across groups for incremental orders using Wilcoxon test ====
+
+wilcox.test(incremental_orders ~ group,
+            data        = experiment_tbl,
+            conf.int    = TRUE,
+            conf.level  = 0.95,
+            exact       = FALSE,
+            correct     = FALSE,
+            alternative = "two.sided")
+
+
+
+
+
+#====== Estimate effect size of experiment ====
+
+cohens_d <- cohens_d(incremental_orders ~ group, data = experiment_tbl)
+
+
+
+
+
+#====== Estimate power of Wilcoxon test results ====
+
+min_group_n <- floor(nrow(experiment_tbl) / 2) #groups are uneven by 1 subject since total participants was an odd number
+
+pwr.t.test(d           = cohens_d$effsize, 
+           sig.level   = 0.05,
+           n           = min_group_n,
+           type        = "two.sample",
+           alternative = "two.sided")
+
+```
+<br>
+
+### Presentation
+**Purpose:** Visualize outcome distributions across treatment and control groups and present test results.
+
+```{r presentation}
+
+#====== Create conclusive incremental orders histogram =====
+
+plot_incremental_orders <- ggplot(experiment_tbl, aes(x = incremental_orders, fill = group)) +
+  geom_histogram(binwidth = 1, position = "identity", alpha = 0.4) +
+  
+  #---- specify colors for plots ----
+  scale_fill_manual(
+    values = c("0" = "#4C78A8",
+               "1" = "#F58518"),
+    labels = c("Control",
+               "Treatment")) +
+  
+  #---- specify y axis scale ----
+  scale_y_continuous(labels = function(x) x / 1000) +
+  
+  #---- specify titles and labels ----
+  labs(
+    title = "Distribution of Incremental Orders by Group",
+    subtitle = "Reminder notifications increase orders by ~0.198 per user (95% CI: 0.193–0.202)",
+    x = "Incremental Orders",
+    y = "Number of Users (thousands)",
+    fill = NULL
+  ) +
+  
+  #---- Specify theme ----
+  theme_minimal(base_size = 12) +
+  
+  theme(
+    panel.grid = element_blank(), ##remove grid lines
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    plot.subtitle = element_text(hjust = 0.5),
+    legend.position = "top"
+  )
+
+plot_incremental_orders
+
+
+ggsave("plot_incremental_order.png", plot_incremental_orders, width = 10, height = 6, dpi = 200)
+
+```
