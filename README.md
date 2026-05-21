@@ -8,7 +8,7 @@ This project evaluated whether reminder notifications encouraging users to reord
 
 <br>
 
-Full R code Rmd file can be found [here](https://github.com/darianmiranda/InstaCart-AB-Test/blob/main/abtesting.Rmd)
+Full R code Rmd file can be found [here](https://github.com/darianmiranda/InstaCart-AB-Test/blob/main/InstaCart-AB-Test.Rmd)
 
 Full R code html file can be found [here](https://github.com/darianmiranda/InstaCart-AB-Test/blob/main/abtesting.html)
 
